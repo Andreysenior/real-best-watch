@@ -93,10 +93,15 @@ jobs:
           $spisok
 
           Проверка каждые 15 минут, сообщения будут повторяться, пока не поднимется. Сторож на самом сервере при этом может молчать: он умирает вместе с сервером."
-            curl -s -m 20 -X POST \
+            # Код ответа печатаем: молчащая тревога — та же поломка, что и
+            # молчащий сторож, и увидеть её можно только здесь. 200 значит
+            # Telegram сообщение принял, всё остальное надо разбирать.
+            otvet=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -X POST \
               "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
               --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
-              --data-urlencode "text=$tekst" \
-              -o /dev/null
+              --data-urlencode "text=$tekst")
+            echo "telegram ответил: $otvet"
+          else
+            echo "токена или чата в секретах нет — тревога ушла только письмом от GitHub"
           fi
           exit 1
