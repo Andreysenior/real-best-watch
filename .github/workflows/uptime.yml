@@ -1,0 +1,90 @@
+# Внешний сторож фабрики: проверяет сайты СНАРУЖИ, с чужой машины.
+#
+# Зачем. На сервере уже есть /usr/local/bin/sreda-monitor.sh, но он живёт
+# на том же сервере, за которым следит: умер сервер целиком, пропала сеть
+# или диск — сообщения не будет вообще. Этот сторож работает на машинах
+# GitHub и потому переживает смерть сервера.
+#
+# Исходник — в приватном репозитории фабрики: factory/server/watch/uptime.yml.
+# Рабочая копия — в ПУБЛИЧНОМ репозитории Andreysenior/real-best-watch,
+# файл .github/workflows/uptime.yml. Публичный он ради бесплатных минут:
+# у приватного репозитория Actions расходуют квоту, у публичного — нет.
+# Внутри нет ничего секретного: только адреса, открытые и так. Токен бота
+# лежит в секретах репозитория, в коде его нет.
+#
+# Тревога уходит в Telegram при КАЖДОЙ неудачной проверке, пока сайт лежит:
+# у workflow нет памяти между запусками, поэтому «сообщать только при смене
+# состояния», как на сервере, здесь не сделать. Это и к лучшему: повторное
+# сообщение раз в 15 минут не даст забыть про лежащий сайт.
+name: Сторож real-best
+
+on:
+  schedule:
+    # Каждые 15 минут. GitHub запускает расписания с задержкой в несколько
+    # минут и может пропустить запуск при своей высокой нагрузке — для
+    # запасного сторожа это допустимо, точность даёт монитор на сервере.
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  proverka:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Проверить адреса
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -u
+          spisok=""
+          bed=0
+
+          # Ожидаемые коды перечисляются через пробел: кабинет без входа
+          # отвечает переадресацией, и это норма, а не сбой.
+          proverit() {
+            adres=$1
+            zhdyom=$2
+            popytka=1
+            while [ "$popytka" -le 2 ]; do
+              kod=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "$adres" || echo 000)
+              for w in $zhdyom; do
+                if [ "$kod" = "$w" ]; then
+                  echo "$adres: $kod — ок"
+                  return 0
+                fi
+              done
+              # Вторая попытка через полминуты: одиночный сбой сети у GitHub
+              # не должен будить хозяина ночью.
+              [ "$popytka" = 1 ] && sleep 30
+              popytka=$((popytka + 1))
+            done
+            echo "$adres: код $kod, ждали $zhdyom"
+            spisok="$spisok
+          $adres — код $kod"
+            bed=1
+          }
+
+          proverit https://real-best.ru/ "200"
+          proverit https://lk.real-best.ru/ "200 302"
+          proverit https://api.real-best.ru/health "200"
+
+          if [ "$bed" = 0 ]; then
+            echo "всё отвечает"
+            exit 0
+          fi
+
+          # Сообщение уходит, только если токен положен в секреты репозитория.
+          # Без него шаг всё равно падает: красный значок виден в GitHub
+          # и приходит письмом на почту владельца.
+          if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
+            tekst="Внешний сторож: фабрика не отвечает снаружи.
+          $spisok
+
+          Проверка каждые 15 минут, сообщения будут повторяться, пока не поднимется. Сторож на самом сервере при этом может молчать: он умирает вместе с сервером."
+            curl -s -m 20 -X POST \
+              "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+              --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
+              --data-urlencode "text=$tekst" \
+              -o /dev/null
+          fi
+          exit 1
