@@ -25,6 +25,11 @@ on:
     # запасного сторожа это допустимо, точность даёт монитор на сервере.
     - cron: '*/15 * * * *'
   workflow_dispatch:
+    inputs:
+      trevoga:
+        description: 'Проверить тревогу: подставить заведомо мёртвый адрес и убедиться, что сообщение дошло'
+        type: boolean
+        default: false
 
 jobs:
   proverka:
@@ -63,6 +68,13 @@ jobs:
           $adres — код $kod"
             bed=1
           }
+
+          # Учебная тревога: запуск руками с галочкой. Иначе путь «сайт лёг»
+          # не проверялся бы никогда — а сторож, чья тревога не доходит,
+          # хуже отсутствия сторожа: на него надеются.
+          if [ "${{ inputs.trevoga }}" = "true" ]; then
+            proverit https://real-best.ru/takogo-adresa-net-eto-uchebnaya-trevoga "200"
+          fi
 
           proverit https://real-best.ru/ "200"
           proverit https://lk.real-best.ru/ "200 302"
